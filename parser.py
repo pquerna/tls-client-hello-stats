@@ -25,6 +25,10 @@ if p not in sys.path:
 
 import dpkt
 
+from collections import defaultdict
+
+DEBUG = False
+
 def pcap_reader(fp):
     return dpkt.pcap.Reader(fp)
 
@@ -40,16 +44,8 @@ def as_percent(a, b):
 TLS_HANDSHAKE = 22
 
 def gather_statistics(cap):
-    counters = {
-        'client_hellos_total': 0,
-        'SSLv3_clients': 0,
-        'TLSv1_clients': 0,
-        'TLSv1.1_clients': 0,
-        'TLSv1.2_clients': 0,
-        'session_ticket_support': 0,
-        'session_id_sent': 0,
-        'deflate_support': 0,
-    }
+    counters = defaultdict(int)
+    known_extensions = set()
     pkt_count = 0
     for ts, buf in cap:
         pkt_count += 1
@@ -73,10 +69,11 @@ def gather_statistics(cap):
         if ord(tcp.data[0]) != TLS_HANDSHAKE:
             continue
 
-        #print 'tcp.sport: %d' % (tcp.sport)
-        #print 'tcp.dport: %d' % (tcp.dport)
-        #print 'tcp.data[0]: %d' % ord(tcp.data[0])
-        #print 'tcp.sum: 0x%x' % tcp.sum
+        if DEBUG:
+            print 'tcp.sport: %d' % (tcp.sport)
+            print 'tcp.dport: %d' % (tcp.dport)
+            print 'tcp.data[0]: %d' % ord(tcp.data[0])
+            print 'tcp.sum: 0x%x' % tcp.sum
 
         records = []
         try:
@@ -126,7 +123,7 @@ def gather_statistics(cap):
             if len(ch.session_id) > 0:
                 counters['session_id_sent'] += 1
 
-            if False:
+            if DEBUG:
                 print ""
                 print 'ch.session_id.version: %s' % dpkt.ssl.ssl3_versions_str[ch.version]
                 print 'ch.session_id.len: %d' % len(ch.session_id)
@@ -137,8 +134,15 @@ def gather_statistics(cap):
             if 1 in ch.compression_methods:
                 counters['deflate_support'] += 1
 
-    print counters
-    return [
+            if DEBUG:
+                import binascii
+                for ext in ch.extensions:
+                    print 'extType: (%d) %s' % (ext.value, ext.name)
+                    print 'extData: %s' % (binascii.hexlify(ext.data))
+            for ext in ch.extensions:
+                known_extensions.add(ext.name)
+                counters['ext_%s' % (ext.name)] += 1
+    stats = [
         {
             'name': 'SSL v3 Clients',
             'value': as_percent(counters['SSLv3_clients'], counters['client_hellos_total']),
@@ -156,10 +160,6 @@ def gather_statistics(cap):
             'value': as_percent(counters['TLSv1.2_clients'], counters['client_hellos_total']),
         },
         {
-            'name': 'SessionTicket Support',
-            'value': as_percent(counters['session_ticket_support'], counters['client_hellos_total']),
-        },
-        {
             'name': 'Sent SessionID',
             'value': as_percent(counters['session_id_sent'], counters['client_hellos_total']),
         },
@@ -168,6 +168,13 @@ def gather_statistics(cap):
             'value': as_percent(counters['deflate_support'], counters['client_hellos_total']),
         }
         ]
+
+    for ext in sorted(known_extensions):
+        stats.append({
+            'name': 'Support for %s extension' % ext,
+            'value': as_percent(counters['ext_%s' % ext], counters['client_hellos_total']),
+        })
+    return stats
 
 def main(argv):
     if len(argv) != 2:
