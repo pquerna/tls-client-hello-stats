@@ -46,6 +46,7 @@ TLS_HANDSHAKE = 22
 def gather_statistics(cap):
     counters = defaultdict(int)
     known_extensions = set()
+    count_extensions = set()
     pkt_count = 0
     for ts, buf in cap:
         pkt_count += 1
@@ -134,6 +135,9 @@ def gather_statistics(cap):
             if 1 in ch.compression_methods:
                 counters['deflate_support'] += 1
 
+            counters['extension_count_%d' % (len(ch.extensions))] += 1
+            count_extensions.add(len(ch.extensions))
+
             if DEBUG:
                 import binascii
                 for ext in ch.extensions:
@@ -143,6 +147,10 @@ def gather_statistics(cap):
                 known_extensions.add(ext.name)
                 counters['ext_%s' % (ext.name)] += 1
     stats = [
+        {
+            'name': 'Client Hello seen',
+            'value': str(counters['client_hellos_total']),
+        },
         {
             'name': 'SSL v3 Clients',
             'value': as_percent(counters['SSLv3_clients'], counters['client_hellos_total']),
@@ -173,6 +181,11 @@ def gather_statistics(cap):
         stats.append({
             'name': 'Support for %s extension' % ext,
             'value': as_percent(counters['ext_%s' % ext], counters['client_hellos_total']),
+        })
+    for count in sorted(count_extensions):
+        stats.append({
+            'name': 'Sent %d extension' % count,
+            'value': as_percent(counters['extension_count_%s' % count], counters['client_hellos_total']),
         })
     return stats
 
