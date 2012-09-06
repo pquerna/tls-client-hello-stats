@@ -224,6 +224,37 @@ class TLSHelloRequest(dpkt.Packet):
     __hdr__ = tuple()
 
 
+TLSExtensionTypes = {
+    0: 'server_name',
+    1: 'max_fragment_length',
+    2: 'client_certificate_url',
+    3: 'trusted_ca_keys',
+    4: 'truncated_hmac',
+    5: 'status_request',
+    6: 'user_mapping',
+    7: 'client_authz',
+    8: 'server_authz',
+    9: 'cert_type',
+    10: 'elliptic_curves',
+    11: 'ec_point_formats',
+    12: 'srp',
+    13: 'signature_algorithms',
+    14: 'use_srtp',
+    15: 'heartbeat',
+    35: 'session_tickets',
+    13172: 'next_protocol_negotiation',
+    65281: 'renegotiation_info',
+}
+
+class TLSExtension(object):
+    def __init__(self, extNumber, data):
+        self.data = data
+        self.value = extNumber
+
+    @property
+    def name(self):
+        return TLSExtensionTypes.get(self.value, 'unknown')
+
 class TLSClientHello(dpkt.Packet):
     __hdr__ = (
         ('version', 'H', 0x0301),
@@ -246,8 +277,21 @@ class TLSClientHello(dpkt.Packet):
         pointer += parsed
         self.num_compression_methods = parsed - 1
         self.compression_methods = map(ord, compression_methods)
-        # extensions
 
+        self.extensions = []
+
+        if len(self.data[pointer:]) <= 0:
+            return
+        # skip total extensions length
+        pointer += 2
+
+        while len(self.data[pointer:]) > 0:
+            # extensions
+            extType = struct.unpack('!H', self.data[pointer:pointer+2])[0]
+            pointer += 2
+            extension, extensionLength = parse_variable_array(self.data[pointer:], 2)
+            pointer += extensionLength
+            self.extensions.append(TLSExtension(extType, extension))
 
 class TLSServerHello(dpkt.Packet):
     __hdr__ = (
